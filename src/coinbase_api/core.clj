@@ -237,11 +237,11 @@
 (defn url [path]
   (format "%s%s" api-url path))
 
-(s/fdef limit-order
-        :args (s/cat :buy? boolean?
-                     :amount :sp/size
-                     :price :sp/price)
-        :ret :coinbase-api.spec/order)
+;; (s/fdef limit-order
+;;         :args (s/cat :buy? boolean?
+;;                      :amount :sp/size
+;;                      :price :sp/price)
+;;         :ret :coinbase-api.spec/order)
 
 (defn limit-order "Returns a request for a limit order"
   [buy? product-id amount price]
@@ -450,3 +450,5 @@
           (kill-all-orders)
           (recur))))))
 
+(defn -main []
+  (println (order-book)))
