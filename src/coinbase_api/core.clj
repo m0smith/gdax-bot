@@ -31,19 +31,26 @@
                                    :asks (sorted-map-by <)}))
 (defonce feed-watchers (atom {}))
 
-(def ws-url "wss://ws-feed-public.sandbox.exchange.coinbase.com")
-(def ws-url "wss://ws-feed.exchange.coinbase.com")
-(def ws-url "wss://ws-feed.gdax.com")
-(def api-url "https://api-public.sandbox.exchange.coinbase.com")
-(def api-url "https://api.gdax.com")
+(def gdax-urls
+ {
+   :sandbox {
+             :web "https://public.sandbox.gdax.com"
+             :api "https://api-public.sandbox.gdax.com"
+             :ws "wss://ws-feed-public.sandbox.gdax.com"
+             }
+   :live {
+          :api "https://api.gdax.com"
+          :ws "wss://ws-feed.gdax.com"
+          }
+   })
 
 
 (defn json-read-str [s]
   (json/read-str s :key-fn keyword))
 
-(defn create-feed-client [product-ids ch]
+(defn create-feed-client [system product-ids ch]
   (println "Creating new feed client")
-  (let [conn (ws/connect ws-url :on-receive (fn [v]
+  (let [conn (ws/connect (get-in gdax-urls [system :ws]) :on-receive (fn [v]
                                               (a/put! ch (json-read-str v))))]
     (ws/send-msg conn (json/write-str {:type "subscribe" :product_ids product-ids}))
     (ws/send-msg conn (json/write-str {:type "heartbeat" :on true}))
@@ -118,8 +125,9 @@
 
 (defn order-book
   "Get the order book from the exchange"
-  []
-  (-> (http/get (format "%s%s" api-url "/products/BTC-USD/book")
+  [system]
+  (-> (http/get (format "%s%s" (get-in gdax-urls [system :api])
+                        "/products/BTC-USD/book")
                 {:query-params {:level 3}})
       :body
       json-read-str
@@ -148,8 +156,8 @@
 
 (defn trades-page
   "Returns paginated trades as a vector of [trades next-page-id]"
-  ([page-id]
-   (let [response (-> (http/get (format "%s%s" api-url "/products/BTC-USD/trades")
+  ([system page-id]
+   (let [response (-> (http/get (format "%s%s" (get-in gdax-urls [system :api]) "/products/BTC-USD/trades")
                                 (when page-id {:query-params {"after" page-id}})))
          trades (-> response
                     :body
@@ -234,8 +242,8 @@
   (with-coinbase-auth
     (http/post url (assoc *credentials* :body body :content-type :json))))
 
-(defn url [path]
-  (format "%s%s" api-url path))
+(defn url [system path]
+  (format "%s%s" (get-in gdax-urls [system :api]) path))
 
 ;; (s/fdef limit-order
 ;;         :args (s/cat :buy? boolean?
@@ -450,5 +458,6 @@
           (kill-all-orders)
           (recur))))))
 
-(defn -main []
-  (println (order-book)))
+(defn -main [system-name]
+  (let [system (keyword system-name)]
+    (println (order-book system))))
