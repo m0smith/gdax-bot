@@ -259,12 +259,12 @@
    :size amount
    :product_id product-id})
 
-(defn accounts []
+(defn accounts [system]
   (letfn [(parse-account [acct]
             (-> acct
                 (update-in [:available] read-string)
                 (update-in [:balance] read-string)))]
-    (map parse-account (-> "/accounts" url get :body json-read-str))))
+    (map parse-account (->> "/accounts" (url system) get :body json-read-str))))
 
 (defn balances 
   "Returns a map of currency name to balance - pass either :available or :balance"
@@ -460,4 +460,5 @@
 
 (defn -main [system-name]
   (let [system (keyword system-name)]
+    (load-file (str (System/getProperty "user.home") "/sandbox.clj"))
     (println (order-book system))))
