@@ -232,15 +232,15 @@
   `(http/with-middleware (conj http/default-middleware #'wrap-coinbase-auth)
      ~@body))
 
-(declare *credentials*)
+(def  *credentials* (atom {}))
 
 (defn get [url]
   (with-coinbase-auth
-    (http/get url *credentials*)))
+    (http/get url @*credentials*)))
 
 (defn post [url body]
   (with-coinbase-auth
-    (http/post url (assoc *credentials* :body body :content-type :json))))
+    (http/post url (assoc @*credentials* :body body :content-type :json))))
 
 (defn url [system path]
   (format "%s%s" (get-in gdax-urls [system :api]) path))
@@ -300,15 +300,16 @@
 
 (defn kill-order [order-id]
   (with-coinbase-auth
-    (http/delete (url (format "/orders/%s" order-id)) *credentials*)))
+    (http/delete (url (format "/orders/%s" order-id)) @*credentials*)))
 
 (defn kill-all-orders []
   (with-coinbase-auth
-    (http/delete (url "/orders") *credentials*)))
+    (http/delete (url "/orders") @*credentials*)))
 
-(defn orders []
+(defn orders [system]
   (with-coinbase-auth
-    (-> "/orders" url (http/get *credentials*) :body json-read-str)))
+    (let [u (url system "/orders")]
+      (-> u (http/get @*credentials*) :body json-read-str))))
 
 (defn best-orders []
   (-> "/products/BTC-USD/book"
@@ -319,7 +320,7 @@
 
 (defn fills []
   (with-coinbase-auth
-    (-> "/fills" url (http/get *credentials*) :body json-read-str)))
+    (-> "/fills" url (http/get @*credentials*) :body json-read-str)))
 
 (defn logistic
   "s-curve calculation for volatility"
@@ -461,4 +462,4 @@
 (defn -main [system-name]
   (let [system (keyword system-name)]
     (load-file (str (System/getProperty "user.home") "/sandbox.clj"))
-    (println (order-book system))))
+    (println (accounts system))))
