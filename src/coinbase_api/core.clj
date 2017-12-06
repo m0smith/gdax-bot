@@ -242,7 +242,7 @@
   (with-coinbase-auth
     (http/post url (assoc @*credentials* :body body :content-type :json))))
 
-(defn url [system path]
+(defn url [path system]
   (format "%s%s" (get-in gdax-urls [system :api]) path))
 
 ;; (s/fdef limit-order
@@ -264,51 +264,51 @@
             (-> acct
                 (update-in [:available] read-string)
                 (update-in [:balance] read-string)))]
-    (map parse-account (->> "/accounts" (url system) get :body json-read-str))))
+    (map parse-account (-> "/accounts" (url system) get :body json-read-str))))
 
 (defn balances 
   "Returns a map of currency name to balance - pass either :available or :balance"
-  ([k]
+  ([k system]
    (into {}
-         (for [[name accts] (group-by :currency (accounts))]
+         (for [[name accts] (group-by :currency (accounts system))]
            [name (-> accts first k)])))
-  ([] (balances :balance)))
+  ([system ] (balances :balance system)))
 
 (defn place-order
   "Places an order and returns the id."
-  [order]
+  [order system]
   (->> order
        json/write-str
-       (post (url "/orders"))
+       (post (url "/orders" system))
        :body
        json-read-str
        :id))
 
-(defn sell-bitcoin [amount price]
+(defn sell-bitcoin [amount price system]
   (place-order {:type "limit"
                 :side "sell"
                 :price price
                 :size amount
-                :product_id "BTC-USD"}))
+                :product_id "BTC-USD"} system))
 
-(defn buy-bitcoin [amount price]
+(defn buy-bitcoin [amount price system]
   (place-order {:type "limit"
                 :side "buy"
                 :price price
                 :size amount
-                :product_id "BTC-USD"}))
+                :product_id "BTC-USD"} system))
 
-(defn kill-order [order-id]
+(defn kill-order [order-id system]
   (with-coinbase-auth
-    (http/delete (url (format "/orders/%s" order-id)) @*credentials*)))
+    (http/delete (url (format "/orders/%s" order-id) system) @*credentials*)))
 
-(defn kill-all-orders []
+(defn kill-all-orders [system]
   (with-coinbase-auth
-    (http/delete (url "/orders") @*credentials*)))
+    (http/delete (url "/orders" system) @*credentials*)))
 
 (defn orders [system]
   (with-coinbase-auth
-    (let [u (url system "/orders")]
+    (let [u (url "/orders" system)]
       (-> u (http/get @*credentials*) :body json-read-str))))
 
 (defn best-orders []
@@ -462,4 +462,8 @@
 (defn -main [system-name]
   (let [system (keyword system-name)]
     (load-file (str (System/getProperty "user.home") "/sandbox.clj"))
-    (println (accounts system))))
+    (println (buy-bitcoin 10 10 system))
+    (println (orders system))
+    (println (kill-all-orders system))
+    (println (orders system))
+    (println (balances system))))
