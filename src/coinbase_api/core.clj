@@ -68,6 +68,7 @@
 (defn keep-current-price-updated [match-ch price-atom]
   (a/go-loop []
     (when-let [match (a/<! match-ch)]
+      (println match)
       (swap! price-atom assoc (:product_id match) (-> match :price read-string))
       (recur))))
 
@@ -101,7 +102,7 @@
         match-ch (a/chan 1)]
     (a/sub (:by-type pubs) "match" match-ch)
     (keep-current-price-updated match-ch current-price)
-    (keep-feed-running feed-chan (:by-type pubs) feed-shutdown-ch)
+    (keep-feed-running [btc-usd] feed-chan (:by-type pubs) feed-shutdown-ch)
     pubs))
 
 (defn on-order-filled-watcher
@@ -460,10 +461,13 @@
           (recur))))))
 
 (defn -main [system-name]
-  (let [system (keyword system-name)]
+  (let [system (keyword system-name)
+        kill-chan (a/chan)]
     (load-file (str (System/getProperty "user.home") "/sandbox.clj"))
-    (println (buy-bitcoin 10 10 system))
-    (println (orders system))
-    (println (kill-all-orders system))
-    (println (orders system))
-    (println (balances system))))
+    (let [feeds (init-feed kill-chan)]
+      (a/go-loop [i nil]
+        (let [cur-price (-> current-price deref (clojure.core/get btc-usd))]
+          (println cur-price)
+          (recur cur-price))))))
+
+
