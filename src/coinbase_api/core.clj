@@ -68,13 +68,13 @@
 (defn keep-current-price-updated [match-ch price-atom]
   (a/go-loop []
     (when-let [match (a/<! match-ch)]
-      (println match)
+      (println "keep-current-price-updated" match)
       (swap! price-atom assoc (:product_id match) (-> match :price read-string))
       (recur))))
 
 (defonce websocket-heartbeat? (atom nil))
 
-(defn keep-feed-running [product-ids feed-chan by-type-pub shutdown-ch]
+(defn keep-feed-running [system product-ids feed-chan by-type-pub shutdown-ch]
   (let [hb-ch (a/chan (a/sliding-buffer 1))]
     (a/sub by-type-pub "heartbeat" hb-ch)
     (a/go-loop [conn nil]
@@ -92,17 +92,18 @@
                 (when conn
                   (try (ws/close conn)
                        (catch Exception _ nil)))
-                (recur (try (create-feed-client product-ids feed-chan)
+                (recur (try (create-feed-client system product-ids feed-chan)
                             (catch Exception e
                               (.printStackTrace e))))))))))
 
-(defn init-feed [feed-shutdown-ch]
+(defn init-feed [system feed-shutdown-ch]
   (defonce feed-chan (a/chan (a/sliding-buffer 100)))
+  (create-feed-client system [btc-usd] feed-chan)
   (let [pubs (pub-sub feed-chan)
         match-ch (a/chan 1)]
     (a/sub (:by-type pubs) "match" match-ch)
     (keep-current-price-updated match-ch current-price)
-    (keep-feed-running [btc-usd] feed-chan (:by-type pubs) feed-shutdown-ch)
+    (keep-feed-running system [btc-usd] feed-chan (:by-type pubs) feed-shutdown-ch)
     pubs))
 
 (defn on-order-filled-watcher
@@ -464,10 +465,9 @@
   (let [system (keyword system-name)
         kill-chan (a/chan)]
     (load-file (str (System/getProperty "user.home") "/sandbox.clj"))
-    (let [feeds (init-feed kill-chan)]
+    (let [feeds (init-feed system kill-chan)]
       (a/go-loop [i nil]
         (let [cur-price (-> current-price deref (clojure.core/get btc-usd))]
-          (println cur-price)
           (recur cur-price))))))
 
 
