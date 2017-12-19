@@ -69,10 +69,14 @@
   (a/go-loop []
     (when-let [match (a/<! match-ch)]
       (println "keep-current-price-updated" match)
+      (spit "/tmp/hamster.log" (str (pr-str match) "\n") :append true)
       (swap! price-atom assoc (:product_id match) (-> match :price read-string))
       (recur))))
 
 (defonce websocket-heartbeat? (atom nil))
+
+(defn tn [n coll]
+  (concat (repeat n (first coll)) coll)) 
 
 (defn keep-feed-running [system product-ids feed-chan by-type-pub shutdown-ch]
   (let [hb-ch (a/chan (a/sliding-buffer 1))]
@@ -167,11 +171,12 @@
          next-page-id (-> response :headers (clojure.core/get "cb-before"))]
      [trades next-page-id])))
 
-(def date-format (timeformat/formatter "yyyy-MM-dd HH:mm:ss.SSSSSSZZ"))
+(def date-format (timeformat/formatter "yyyy-MM-dd'T'HH:mm:ss.SSSSSSZZ"))
 
 (def format-date (partial timeformat/parse date-format))
 
 (defn parse-trade [trade]
+  (println "trade" trade)
   (-> trade
       (update-in [:price] read-string)
       (update-in [:size] read-string)))
@@ -186,19 +191,19 @@
 
 (defn all-trades-since
   "all trades since n seconds ago"
-  ([n next-id]
+  ([system n next-id]
    (filter-trades
-    (let [[trades next-id] (trades-page next-id)
+    (let [[trades next-id] (trades-page system next-id)
           trades (map parse-trade trades)]
-      (lazy-seq (concat trades (all-trades-since n next-id))))
+      (lazy-seq (concat trades (all-trades-since system n next-id))))
     n))
-  ([n]
-   (all-trades-since n nil)))
+  ([system n]
+   (all-trades-since system n nil)))
 
 (defn price-difference
   "Price change between n seconds ago and now"
-  [n]
-  (let [trades (all-trades-since n)
+  [system n]
+  (let [trades (all-trades-since system n)
         oldest (last trades)
         newest (first trades)]
     (- (:price newest) (:price oldest))))
@@ -461,10 +466,18 @@
           (kill-all-orders)
           (recur))))))
 
+(defn all-trades-report [system]
+  (let [trades (all-trades-since system 10000)
+        prices (map :price trades)
+        t-trades  (map #(merge %1 {:t1 %2 :t10 %3}) trades prices (tn 10 prices))
+        dt-trades (map #(merge %1 {:dt1 :dt10}))]
+    dt-trades))
+
 (defn -main [system-name]
   (let [system (keyword system-name)
         kill-chan (a/chan)]
     (load-file (str (System/getProperty "user.home") "/sandbox.clj"))
+    ;;; (println (all-trades-report system))
     (let [feeds (init-feed system kill-chan)]
       (a/go-loop [i nil]
         (let [cur-price (-> current-price deref (clojure.core/get btc-usd))]
