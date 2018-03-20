@@ -31,6 +31,14 @@
                                    :asks (sorted-map-by <)}))
 (defonce feed-watchers (atom {}))
 
+(defn seq!!
+  "Returns a (blocking!) lazy sequence read from a channel."
+  [c]
+  (lazy-seq
+   (when-let [v (a/<!! c)]
+     (cons v (seq!! c)))))
+
+
 (def gdax-urls
  {
    :sandbox {
@@ -68,7 +76,7 @@
 (defn keep-current-price-updated [match-ch price-atom]
   (a/go-loop []
     (when-let [match (a/<! match-ch)]
-      (println "keep-current-price-updated" match)
+      ;; (println "keep-current-price-updated" match)
       (spit "/tmp/hamster.log" (str (pr-str match) "\n") :append true)
       (swap! price-atom assoc (:product_id match) (-> match :price read-string))
       (recur))))
@@ -103,6 +111,7 @@
 (defn init-feed [system feed-shutdown-ch]
   (defonce feed-chan (a/chan (a/sliding-buffer 100)))
   (create-feed-client system [btc-usd] feed-chan)
+
   (let [pubs (pub-sub feed-chan)
         match-ch (a/chan 1)]
     (a/sub (:by-type pubs) "match" match-ch)
@@ -176,7 +185,7 @@
 (def format-date (partial timeformat/parse date-format))
 
 (defn parse-trade [trade]
-  (println "trade" trade)
+  ;;(println "trade" trade)
   (-> trade
       (update-in [:price] read-string)
       (update-in [:size] read-string)))
@@ -239,15 +248,15 @@
   `(http/with-middleware (conj http/default-middleware #'wrap-coinbase-auth)
      ~@body))
 
-(def  *credentials* (atom {}))
+(def  credentials (atom {}))
 
 (defn get [url]
   (with-coinbase-auth
-    (http/get url @*credentials*)))
+    (http/get url @credentials)))
 
 (defn post [url body]
   (with-coinbase-auth
-    (http/post url (assoc @*credentials* :body body :content-type :json))))
+    (http/post url (assoc @credentials :body body :content-type :json))))
 
 (defn url [path system]
   (format "%s%s" (get-in gdax-urls [system :api]) path))
@@ -307,16 +316,16 @@
 
 (defn kill-order [order-id system]
   (with-coinbase-auth
-    (http/delete (url (format "/orders/%s" order-id) system) @*credentials*)))
+    (http/delete (url (format "/orders/%s" order-id) system) @credentials)))
 
 (defn kill-all-orders [system]
   (with-coinbase-auth
-    (http/delete (url "/orders" system) @*credentials*)))
+    (http/delete (url "/orders" system) @credentials)))
 
 (defn orders [system]
   (with-coinbase-auth
     (let [u (url "/orders" system)]
-      (-> u (http/get @*credentials*) :body json-read-str))))
+      (-> u (http/get @credentials) :body json-read-str))))
 
 (defn best-orders []
   (-> "/products/BTC-USD/book"
@@ -327,7 +336,7 @@
 
 (defn fills []
   (with-coinbase-auth
-    (-> "/fills" url (http/get @*credentials*) :body json-read-str)))
+    (-> "/fills" url (http/get @credentials) :body json-read-str)))
 
 (defn logistic
   "s-curve calculation for volatility"
@@ -467,20 +476,24 @@
           (recur))))))
 
 (defn all-trades-report [system]
-  (let [trades (all-trades-since system 10000)
+  (let [trades (all-trades-since system 20)
         prices (map :price trades)
-        t-trades  (map #(merge %1 {:t1 %2 :t10 %3}) trades prices (tn 10 prices))
-        dt-trades (map #(merge %1 {:dt1 :dt10}))]
+        t-trades  (map #(merge %1 {:t1 %2 :t10 %3}) trades (tn 1 prices)
+                       (tn 10 prices))
+        dt-trades (map #(merge %1 {:dt1  (- (:t1 %1)  (:price %1))
+                                   :dt10 (- (:t10 %1) (:price %1))}) t-trades)]
     dt-trades))
 
 (defn -main [system-name]
   (let [system (keyword system-name)
         kill-chan (a/chan)]
     (load-file (str (System/getProperty "user.home") "/sandbox.clj"))
-    ;;; (println (all-trades-report system))
-    (let [feeds (init-feed system kill-chan)]
-      (a/go-loop [i nil]
-        (let [cur-price (-> current-price deref (clojure.core/get btc-usd))]
-          (recur cur-price))))))
+    ;; (println (all-trades-report system))
+    (let [feeds (init-feed  system kill-chan)
+          hamster-chan (a/chan 1)]
+      (a/sub (:by-type feeds) "match" hamster-chan)
+      (a/go
+        (let [price-seq (seq!! hamster-chan)]
+          (println "HAMSTER:" (take 1 price-seq)))))))
 
 
